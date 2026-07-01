@@ -12,42 +12,36 @@
 #include "esp_log.h"
 
 // HID keyboard input report length
-#define HID_KEYBOARD_IN_RPT_LEN 8
+#define HID_KEYBOARD_IN_RPT_LEN     8
 
 // HID LED output report length
-#define HID_LED_OUT_RPT_LEN 1
+#define HID_LED_OUT_RPT_LEN         1
 
 // HID mouse input report length
-#define HID_MOUSE_IN_RPT_LEN 5
+#define HID_MOUSE_IN_RPT_LEN        5
 
 // HID consumer control input report length
-#define HID_CC_IN_RPT_LEN 2
+#define HID_CC_IN_RPT_LEN           2
 
 esp_err_t esp_hidd_register_callbacks(esp_hidd_event_cb_t callbacks)
 {
     esp_err_t hidd_status;
 
-    if (callbacks != NULL)
-    {
-        hidd_le_env.hidd_cb = callbacks;
-    }
-    else
-    {
+    if(callbacks != NULL) {
+   	    hidd_le_env.hidd_cb = callbacks;
+    } else {
         return ESP_FAIL;
     }
 
-    if ((hidd_status = hidd_register_cb()) != ESP_OK)
-    {
+    if((hidd_status = hidd_register_cb()) != ESP_OK) {
         return hidd_status;
     }
 
-    if ((hidd_status = esp_ble_gatts_app_register(BATTRAY_APP_ID)) != ESP_OK)
-    {
+    if ((hidd_status = esp_ble_gatts_app_register(BATTRAY_APP_ID)) != ESP_OK) {
         return hidd_status;
     }
 
-    if ((hidd_status = esp_ble_gatts_app_register(HIDD_APP_ID)) != ESP_OK)
-    {
+    if ((hidd_status = esp_ble_gatts_app_register(HIDD_APP_ID)) != ESP_OK) {
         return hidd_status;
     }
 
@@ -56,8 +50,7 @@ esp_err_t esp_hidd_register_callbacks(esp_hidd_event_cb_t callbacks)
 
 esp_err_t esp_hidd_profile_init(void)
 {
-    if (hidd_le_env.enabled)
-    {
+     if (hidd_le_env.enabled) {
         ESP_LOGE(HID_LE_PRF_TAG, "HID device profile already initialized");
         return ESP_FAIL;
     }
@@ -72,39 +65,29 @@ esp_err_t esp_hidd_profile_init(void)
 esp_err_t esp_hidd_profile_deinit(void)
 {
     uint16_t hidd_svc_hdl = hidd_le_env.hidd_inst.att_tbl[HIDD_LE_IDX_SVC];
-    if (!hidd_le_env.enabled)
-    {
+    if (!hidd_le_env.enabled) {
         ESP_LOGW(HID_LE_PRF_TAG, "HID device profile not initialized, deinit skipped");
         return ESP_OK;
     }
 
-    if (hidd_svc_hdl != 0)
-    {
+    if (hidd_svc_hdl != 0) {
         esp_ble_gatts_stop_service(hidd_svc_hdl);
         esp_ble_gatts_delete_service(hidd_svc_hdl);
-    }
-    else
-    {
+    } else {
         ESP_LOGW(HID_LE_PRF_TAG, "HID service handle unset, skip stop/delete");
     }
 
     /* Release both GATTS apps (battery registered first, then HID) */
-    if (hidd_le_env.bat_gatt_if != ESP_GATT_IF_NONE)
-    {
+    if (hidd_le_env.bat_gatt_if != ESP_GATT_IF_NONE) {
         esp_ble_gatts_app_unregister(hidd_le_env.bat_gatt_if);
         hidd_le_env.bat_gatt_if = ESP_GATT_IF_NONE;
-    }
-    else
-    {
+    } else {
         ESP_LOGW(HID_LE_PRF_TAG, "Battery gatt_if invalid, app_unregister skipped (possible stack slot leak)");
     }
-    if (hidd_le_env.gatt_if != ESP_GATT_IF_NONE)
-    {
+    if (hidd_le_env.gatt_if != ESP_GATT_IF_NONE) {
         esp_ble_gatts_app_unregister(hidd_le_env.gatt_if);
         hidd_le_env.gatt_if = ESP_GATT_IF_NONE;
-    }
-    else
-    {
+    } else {
         ESP_LOGW(HID_LE_PRF_TAG, "HID gatt_if invalid, app_unregister skipped (possible stack slot leak)");
     }
 
@@ -114,14 +97,13 @@ esp_err_t esp_hidd_profile_deinit(void)
 
 uint16_t esp_hidd_get_version(void)
 {
-    return HIDD_VERSION;
+	return HIDD_VERSION;
 }
 
 void esp_hidd_send_consumer_value(uint16_t conn_id, uint8_t key_cmd, bool key_pressed)
 {
     uint8_t buffer[HID_CC_IN_RPT_LEN] = {0, 0};
-    if (key_pressed)
-    {
+    if (key_pressed) {
         ESP_LOGD(HID_LE_PRF_TAG, "hid_consumer_build_report");
         hid_consumer_build_report(buffer, key_cmd);
     }
@@ -133,8 +115,7 @@ void esp_hidd_send_consumer_value(uint16_t conn_id, uint8_t key_cmd, bool key_pr
 
 void esp_hidd_send_keyboard_value(uint16_t conn_id, key_mask_t special_key_mask, uint8_t *keyboard_cmd, uint8_t num_key)
 {
-    if (num_key > HID_KEYBOARD_IN_RPT_LEN - 2)
-    {
+    if (num_key > HID_KEYBOARD_IN_RPT_LEN - 2) {
         ESP_LOGE(HID_LE_PRF_TAG, "%s(), the number key should not be more than %d", __func__, HID_KEYBOARD_IN_RPT_LEN);
         return;
     }
@@ -143,9 +124,8 @@ void esp_hidd_send_keyboard_value(uint16_t conn_id, key_mask_t special_key_mask,
 
     buffer[0] = special_key_mask;
 
-    for (int i = 0; i < num_key; i++)
-    {
-        buffer[i + 2] = keyboard_cmd[i];
+    for (int i = 0; i < num_key; i++) {
+        buffer[i+2] = keyboard_cmd[i];
     }
 
     ESP_LOGD(HID_LE_PRF_TAG, "the key value = %d,%d,%d, %d, %d, %d,%d, %d", buffer[0], buffer[1], buffer[2], buffer[3], buffer[4], buffer[5], buffer[6], buffer[7]);
@@ -158,11 +138,11 @@ void esp_hidd_send_mouse_value(uint16_t conn_id, uint8_t mouse_button, int8_t mi
 {
     uint8_t buffer[HID_MOUSE_IN_RPT_LEN];
 
-    buffer[0] = mouse_button; // Buttons
-    buffer[1] = mickeys_x;    // X
-    buffer[2] = mickeys_y;    // Y
-    buffer[3] = 0;            // Wheel
-    buffer[4] = 0;            // AC Pan
+    buffer[0] = mouse_button;   // Buttons
+    buffer[1] = mickeys_x;           // X
+    buffer[2] = mickeys_y;           // Y
+    buffer[3] = 0;           // Wheel
+    buffer[4] = 0;           // AC Pan
 
     hid_dev_send_report(hidd_le_env.gatt_if, conn_id,
                         HID_RPT_ID_MOUSE_IN, HID_REPORT_TYPE_INPUT, HID_MOUSE_IN_RPT_LEN, buffer);
