@@ -1,9 +1,3 @@
-/*
- * SPDX-FileCopyrightText: 2021-2025 Espressif Systems (Shanghai) CO LTD
- *
- * SPDX-License-Identifier: Unlicense OR CC0-1.0
- */
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -25,38 +19,21 @@
 #include "esp_bt_main.h"
 #include "esp_bt_device.h"
 #include "driver/gpio.h"
+#include "board_pins.h"
 #include "hid_dev.h"
-
-/**
- * Brief:
- * This example Implemented BLE HID device profile related functions, in which the HID device
- * has 4 Reports (1 is mouse, 2 is keyboard and LED, 3 is Consumer Devices, 4 is Vendor devices).
- * Users can choose different reports according to their own application scenarios.
- * BLE HID profile inheritance and USB HID class.
- */
-
-/**
- * Note:
- * 1. Win10 does not support vendor report , So SUPPORT_REPORT_VENDOR is always set to FALSE, it defines in hidd_le_prf_int.h
- * 2. Update connection parameters are not allowed during iPhone HID encryption, slave turns
- * off the ability to automatically update connection parameters during encryption.
- * 3. After our HID device is connected, the iPhones write 1 to the Report Characteristic Configuration Descriptor,
- * even if the HID encryption is not completed. This should actually be written 1 after the HID encryption is completed.
- * we modify the permissions of the Report Characteristic Configuration Descriptor to `ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE_ENCRYPTED`.
- * if you got `GATT_INSUF_ENCRYPTION` error, please ignore.
- */
+#include "macropad_display.h"
+#include "macropad_rgb.h"
 
 #define HID_DEMO_TAG "HID_DEMO"
 
 
 static uint16_t hid_conn_id = 0;
 static bool sec_conn = false;
-static bool send_volum_up = false;
 #define CHAR_DECLARATION_SIZE   (sizeof(uint8_t))
 
 static void hidd_event_callback(esp_hidd_cb_event_t event, esp_hidd_cb_param_t *param);
 
-#define HIDD_DEVICE_NAME            "HID"
+#define HIDD_DEVICE_NAME "Macropad"
 static uint8_t hidd_service_uuid128[] = {
     /* LSB <--------------------------------------------------------------------------------> MSB */
     //first uuid, 16bit, [12],[13] is the value
@@ -90,6 +67,79 @@ static esp_ble_adv_params_t hidd_adv_params = {
     .adv_filter_policy = ADV_FILTER_ALLOW_SCAN_ANY_CON_ANY,
 };
 
+typedef struct
+{
+    const char *word;
+    uint8_t red;
+    uint8_t green;
+    uint8_t blue;
+} macropad_mode_t;
+
+static const macropad_mode_t modes[] = {
+    {"ALPHA", 255, 0, 0},
+    {"BRAVO", 255, 255, 0},
+    {"CHARLIE", 0, 255, 0},
+    {"DELTA", 0, 255, 255},
+    {"ECHO", 0, 0, 255},
+    {"FOXTROT", 255, 0, 255},
+};
+
+static size_t current_mode = 0;
+
+static void apply_mode(size_t mode)
+{
+    const macropad_mode_t *selected = &modes[mode];
+
+    ESP_ERROR_CHECK(macropad_rgb_set(selected->red, selected->green, selected->blue));
+    ESP_ERROR_CHECK(macropad_display_show_word(selected->word, selected->red, selected->green, selected->blue));
+    ESP_LOGI(HID_DEMO_TAG, "Mode changed to %s", selected->word);
+}
+
+static void mode_button_init(void)
+{
+    gpio_config_t button_config = {
+        .pin_bit_mask = 1ULL << MODE_BUTTON_PIN,
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    ESP_ERROR_CHECK(gpio_config(&button_config));
+}
+
+static bool mode_button_pressed(void)
+{
+    return gpio_get_level(MODE_BUTTON_PIN) == 0;
+}
+
+static void mode_button_task(void *pvParameters)
+{
+    bool was_pressed = mode_button_pressed();
+
+    while (1)
+    {
+        bool pressed = mode_button_pressed();
+
+        if (pressed && !was_pressed)
+        {
+            vTaskDelay(pdMS_TO_TICKS(30));
+            if (mode_button_pressed())
+            {
+                current_mode = (current_mode + 1) % (sizeof(modes) / sizeof(modes[0]));
+                apply_mode(current_mode);
+
+                while (mode_button_pressed())
+                {
+                    vTaskDelay(pdMS_TO_TICKS(20));
+                }
+                pressed = false;
+            }
+        }
+
+        was_pressed = pressed;
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+}
 
 static void hidd_event_callback(esp_hidd_cb_event_t event, esp_hidd_cb_param_t *param)
 {
@@ -168,30 +218,6 @@ static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param
     }
 }
 
-void hid_demo_task(void *pvParameters)
-{
-    vTaskDelay(1000 / portTICK_PERIOD_MS);
-    while(1) {
-        vTaskDelay(2000 / portTICK_PERIOD_MS);
-        if (sec_conn) {
-            ESP_LOGI(HID_DEMO_TAG, "Send the volume");
-            send_volum_up = true;
-            //uint8_t key_vaule = {HID_KEY_A};
-            //esp_hidd_send_keyboard_value(hid_conn_id, 0, &key_vaule, 1);
-            esp_hidd_send_consumer_value(hid_conn_id, HID_CONSUMER_VOLUME_UP, true);
-            vTaskDelay(3000 / portTICK_PERIOD_MS);
-            if (send_volum_up) {
-                send_volum_up = false;
-                esp_hidd_send_consumer_value(hid_conn_id, HID_CONSUMER_VOLUME_UP, false);
-                esp_hidd_send_consumer_value(hid_conn_id, HID_CONSUMER_VOLUME_DOWN, true);
-                vTaskDelay(3000 / portTICK_PERIOD_MS);
-                esp_hidd_send_consumer_value(hid_conn_id, HID_CONSUMER_VOLUME_DOWN, false);
-            }
-        }
-    }
-}
-
-
 void app_main(void)
 {
     esp_err_t ret;
@@ -203,6 +229,12 @@ void app_main(void)
         ret = nvs_flash_init();
     }
     ESP_ERROR_CHECK( ret );
+
+    ESP_ERROR_CHECK(macropad_rgb_init());
+    ESP_ERROR_CHECK(macropad_display_init());
+    mode_button_init();
+    apply_mode(current_mode);
+    xTaskCreate(&mode_button_task, "mode_button", 4096, NULL, 5, NULL);
 
     ESP_ERROR_CHECK(esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT));
 
@@ -255,6 +287,4 @@ void app_main(void)
     and the init key means which key you can distribute to the slave. */
     esp_ble_gap_set_security_param(ESP_BLE_SM_SET_INIT_KEY, &init_key, sizeof(uint8_t));
     esp_ble_gap_set_security_param(ESP_BLE_SM_SET_RSP_KEY, &rsp_key, sizeof(uint8_t));
-
-    xTaskCreate(&hid_demo_task, "hid_task", 2048, NULL, 5, NULL);
 }
